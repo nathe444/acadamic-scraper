@@ -8,6 +8,7 @@ A powerful Python tool for searching and downloading academic papers from multip
   - PubMed Central (PMC) - Biomedical and life sciences
   - arXiv - Physics, Mathematics, Computer Science, etc.
   - Semantic Scholar - Cross-disciplinary academic search
+  - Google Scholar - Wide academic coverage
 
 - Advanced capabilities:
   - Concurrent downloads (up to 3 simultaneous)
@@ -55,12 +56,12 @@ Papers are searched in the following order:
 1. PubMed Central (PMC) - Peer-reviewed biomedical literature
 2. arXiv - Preprints in sciences and mathematics
 3. Semantic Scholar - Wide academic coverage
+4. Google Scholar
 
 ## Output
 
 - Downloads are saved to the `downloads` directory (created automatically)
 - File names are sanitized for compatibility
-- Detailed console logging of search results and download progress
 - PDF format optimized for NotebookLM ingestion
 
 ## Requirements
@@ -78,7 +79,6 @@ Papers are searched in the following order:
 ## Limitations
 
 - Depends on source API availability
-- PDF downloads only
 - Subject to rate limiting by sources
 - Some papers may require institutional access
 

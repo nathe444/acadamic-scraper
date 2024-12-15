@@ -6,6 +6,7 @@ from urllib.parse import quote_plus
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
 import concurrent.futures
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,7 @@ class ResourceScraper:
         self.arxiv_url = 'https://export.arxiv.org/api/query?search_query='
         self.semantic_url = 'https://api.semanticscholar.org/graph/v1/paper/search'
         self.pmc_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/'
+        self.scholar_url = 'https://scholar.google.com/scholar'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -137,19 +139,21 @@ class ResourceScraper:
                 
                 for paper in data.get('data', []):
                     try:
-                        title = paper.get('title')
+                        title = paper.get('title', '')
                         if not title:
-                            continue
-                            
-                        # Get PDF URL if available
-                        pdf_url = paper.get('openAccessPdf', {}).get('url')
-                        if not pdf_url:
+                            logger.debug(f"No title found in paper data: {paper}")
                             continue
                         
-                        # Get metadata
-                        authors = [author.get('name', '') for author in paper.get('authors', [])]
-                        year = paper.get('year', '')
-                        abstract = paper.get('abstract', '')
+                        # Safely get the PDF URL
+                        pdf_url = paper.get('openAccessPdf', {}).get('url', '')
+                        if not pdf_url:
+                            logger.debug(f"No PDF URL found for paper: {title}")
+                            continue
+                        
+                        # Safely get metadata
+                        authors = [author.get('name', '') for author in paper.get('authors', []) if author.get('name')]
+                        year = paper.get('year', '') or 'Unknown'
+                        abstract = paper.get('abstract', '') or 'No abstract available'
                         
                         results.append({
                             'title': title,
@@ -163,6 +167,7 @@ class ResourceScraper:
                     
                     except Exception as e:
                         logger.error(f"Error parsing Semantic Scholar result: {str(e)}")
+                        logger.debug(f"Problematic data: {paper}")
                         continue
                 
                 return results
@@ -277,6 +282,77 @@ class ResourceScraper:
             logger.error(f"Error searching PMC: {str(e)}")
             return []
 
+    def search_google_scholar(self, query, max_results=10):
+        """Search Google Scholar for papers."""
+        try:
+            params = {
+                'q': query,
+                'hl': 'en',
+                'num': max_results,
+                'as_sdt': '0,5'
+            }
+            
+            logger.info(f"Searching Google Scholar for: {query}")
+            
+            response = self.session.get(
+                self.scholar_url,
+                params=params,
+                timeout=30
+            )
+            
+            results = []
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                articles = soup.find_all('div', class_='gs_r gs_or gs_scl')
+                
+                for article in articles[:max_results]:
+                    try:
+                        title_elem = article.find('h3', class_='gs_rt')
+                        if not title_elem:
+                            continue
+                            
+                        title = title_elem.get_text(strip=True)
+                        
+                        meta = article.find('div', class_='gs_a')
+                        authors = []
+                        published = ''
+                        if meta:
+                            meta_text = meta.get_text(strip=True)
+                            parts = meta_text.split('-')
+                            if len(parts) > 0:
+                                authors = [a.strip() for a in parts[0].split(',')]
+                            if len(parts) > 1:
+                                year_match = re.search(r'\d{4}', parts[1])
+                                if year_match:
+                                    published = year_match.group(0)
+                        
+                        summary_elem = article.find('div', class_='gs_rs')
+                        summary = summary_elem.get_text(strip=True) if summary_elem else ''
+                        
+                        pdf_link = None
+                        for link in article.find_all('a'):
+                            if '[PDF]' in link.get_text() or 'pdf' in link.get('href', '').lower():
+                                pdf_link = link.get('href')
+                                break
+                        
+                        if pdf_link:
+                            results.append({
+                                'title': title,
+                                'url': pdf_link,
+                                'authors': authors,
+                                'published': published,
+                                'summary': summary[:200] + '...' if summary else ''
+                            })
+                    except Exception as e:
+                        logger.error(f"Error parsing Google Scholar entry: {str(e)}")
+                        continue
+                        
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error searching Google Scholar: {str(e)}")
+            return []
+
     def download_paper(self, url, title):
         """Download a paper with progress tracking."""
         try:
@@ -342,6 +418,19 @@ class ResourceScraper:
         all_papers.extend(arxiv_papers)
         
         # Finally search Semantic Scholar
+        logger.info("\nSearching Google Scholar...")
+        google_papers = self.search_google_scholar(query, max_results)
+        if google_papers:
+            logger.info(f"\nFound {len(google_papers)} papers on Google Scholar:")
+            for i, paper in enumerate(google_papers, 1):
+                logger.info(f"\n{i}. {paper['title']}")
+                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
+                logger.info(f"   Published: {paper['published']}")
+                if paper.get('summary'):
+                    logger.info(f"   Summary: {paper['summary']}")
+        all_papers.extend(google_papers)
+
+
         logger.info("\nSearching Semantic Scholar...")
         semantic_papers = self.search_semantic_scholar(query, max_results)
         if semantic_papers:
