@@ -10,6 +10,7 @@ A powerful Python tool for searching and downloading academic papers from multip
   - Semantic Scholar - Cross-disciplinary academic search
   - Google Scholar - Wide academic coverage
   - Google Books - Free and downloadable books
+  - Wikibooks - Free educational textbooks and manuals
 
 - Advanced capabilities:
   - Concurrent downloads (up to 3 simultaneous)
@@ -36,17 +37,6 @@ pip install -r requirements.txt
 
 ## Usage
 
-```python
-from scholarly_scraper import ResourceScraper
-
-# Initialize scraper
-scraper = ResourceScraper(output_dir="downloads")
-
-# Search and download papers
-results = scraper.search_and_download("your search query", max_results=5)
-```
-
-Or run directly from command line:
 ```bash
 python scraper.py
 ```
@@ -59,6 +49,7 @@ Papers are searched in the following order:
 3. Semantic Scholar - Wide academic coverage
 4. Google Scholar
 5. Google Books
+6. Wikibooks - Open educational resources
 
 ## Output
 

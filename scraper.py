@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ResourceScraper:
-    """A class to search and download academic papers from arXiv, Semantic Scholar, PMC, and Google Books."""
+    """A class to search and download academic papers from arXiv, Semantic Scholar, PMC, Google Books, and Wikibooks."""
     
     def __init__(self, output_dir="downloads"):
         """Initialize the scraper with an output directory."""
@@ -32,6 +32,7 @@ class ResourceScraper:
         self.pmc_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/'
         self.scholar_url = 'https://scholar.google.com/scholar'
         self.google_books_url = 'https://www.googleapis.com/books/v1/volumes'
+        self.wikibooks_url = 'https://en.wikibooks.org'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -424,6 +425,99 @@ class ResourceScraper:
             logger.error(f"Error searching Google Books: {str(e)}")
             return []
 
+    def search_wikibooks(self, query, max_results=10):
+        """Search Wikibooks for educational content."""
+        try:
+            logger.info(f"Searching Wikibooks for: {query}")
+            
+            # Wikibooks search URL
+            search_url = f"{self.wikibooks_url}/w/index.php"
+            params = {
+                'search': query,
+                'title': 'Special:Search',
+                'profile': 'advanced',
+                'fulltext': '1',
+                'ns0': '1'  # Search in main namespace
+            }
+            
+            response = self.session.get(search_url, params=params, timeout=30)
+            results = []
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                # Find all search results
+                search_results = soup.find_all('div', class_='mw-search-result-heading')
+                
+                for result in search_results[:max_results]:
+                    try:
+                        # Get title and link
+                        title_elem = result.find('a')
+                        if not title_elem:
+                            continue
+                        
+                        title = title_elem.get_text(strip=True)
+                        book_url = title_elem.get('href', '')
+                        
+                        if not book_url:
+                            continue
+                        
+                        # Make URL absolute
+                        if book_url.startswith('/'):
+                            book_url = self.wikibooks_url + book_url
+                        
+                        # Visit book page
+                        book_response = self.session.get(book_url, timeout=30)
+                        if book_response.status_code == 200:
+                            book_soup = BeautifulSoup(book_response.text, 'html.parser')
+                            
+                            # Get authors
+                            authors = []
+                            author_links = book_soup.find_all('a', class_='mw-userlink')
+                            if author_links:
+                                authors = [a.get_text(strip=True) for a in author_links[:3]]  # Get top 3 contributors
+                            
+                            # Get last modified date as published date
+                            published = ''
+                            footer = book_soup.find('div', id='footer-info-lastmod')
+                            if footer:
+                                date_match = re.search(r'\d{1,2}\s+\w+\s+\d{4}', footer.get_text())
+                                if date_match:
+                                    published = date_match.group(0)
+                            
+                            # Get summary
+                            summary = ''
+                            content = book_soup.find('div', id='mw-content-text')
+                            if content:
+                                paragraphs = content.find_all('p', recursive=False)
+                                if paragraphs:
+                                    summary = paragraphs[0].get_text(strip=True)
+                            
+                            # Get printable version URL for PDF
+                            printable_url = f"{book_url}?printable=yes"
+                            
+                            results.append({
+                                'title': title,
+                                'url': printable_url,
+                                'authors': authors,
+                                'published': published,
+                                'summary': summary[:200] + '...' if summary else ''
+                            })
+                            
+                            logger.info(f"Found book: {title}")
+                            
+                            if len(results) >= max_results:
+                                break
+                    
+                    except Exception as e:
+                        logger.error(f"Error parsing Wikibooks entry: {str(e)}")
+                        continue
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error searching Wikibooks: {str(e)}")
+            return []
+
     def download_paper(self, url, title):
         """Download a paper with progress tracking."""
         try:
@@ -526,6 +620,19 @@ class ResourceScraper:
                 if book.get('summary'):
                     logger.info(f"   Summary: {book['summary']}")
         all_papers.extend(google_books)
+        
+        # Search Wikibooks
+        logger.info("\nSearching Wikibooks...")
+        wikibooks = self.search_wikibooks(query, max_results)
+        if wikibooks:
+            logger.info(f"\nFound {len(wikibooks)} books on Wikibooks:")
+            for i, book in enumerate(wikibooks, 1):
+                logger.info(f"\n{i}. {book['title']}")
+                logger.info(f"   Authors: {', '.join(book['authors'][:3])}")
+                logger.info(f"   Published: {book['published']}")
+                if book.get('summary'):
+                    logger.info(f"   Summary: {book['summary']}")
+        all_papers.extend(wikibooks)
         
         if not all_papers:
             logger.info("No papers found.")
