@@ -9,6 +9,7 @@ A powerful Python tool for searching and downloading academic papers from multip
   - arXiv - Physics, Mathematics, Computer Science, etc.
   - Semantic Scholar - Cross-disciplinary academic search
   - Google Scholar - Wide academic coverage
+  - Google Books - Free and downloadable books
 
 - Advanced capabilities:
   - Concurrent downloads (up to 3 simultaneous)
@@ -47,7 +48,7 @@ results = scraper.search_and_download("your search query", max_results=5)
 
 Or run directly from command line:
 ```bash
-python scholarly_scraper.py
+python scraper.py
 ```
 
 ## Search Order
@@ -57,6 +58,7 @@ Papers are searched in the following order:
 2. arXiv - Preprints in sciences and mathematics
 3. Semantic Scholar - Wide academic coverage
 4. Google Scholar
+5. Google Books
 
 ## Output
 

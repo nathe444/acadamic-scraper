@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ResourceScraper:
-    """A class to search and download academic papers from arXiv, Semantic Scholar, and PMC."""
+    """A class to search and download academic papers from arXiv, Semantic Scholar, PMC, and Google Books."""
     
     def __init__(self, output_dir="downloads"):
         """Initialize the scraper with an output directory."""
@@ -31,6 +31,7 @@ class ResourceScraper:
         self.semantic_url = 'https://api.semanticscholar.org/graph/v1/paper/search'
         self.pmc_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/'
         self.scholar_url = 'https://scholar.google.com/scholar'
+        self.google_books_url = 'https://www.googleapis.com/books/v1/volumes'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -353,6 +354,76 @@ class ResourceScraper:
             logger.error(f"Error searching Google Scholar: {str(e)}")
             return []
 
+    def search_google_books(self, query, max_results=10):
+        """Search Google Books for documents."""
+        try:
+            logger.info(f"Searching Google Books for: {query}")
+            
+            params = {
+                'q': query,
+                'maxResults': max_results,
+                'filter': 'free-ebooks',  # Only get free and downloadable books
+                'download': 'epub',  # Include download links
+                'printType': 'books'
+            }
+            
+            response = self.session.get(self.google_books_url, params=params, timeout=30)
+            
+            results = []
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get('items', [])
+                
+                for item in items[:max_results]:
+                    try:
+                        volume_info = item.get('volumeInfo', {})
+                        access_info = item.get('accessInfo', {})
+                        
+                        # Skip if no download links available
+                        if not access_info.get('pdf', {}).get('downloadLink') and not access_info.get('epub', {}).get('downloadLink'):
+                            continue
+                        
+                        title = volume_info.get('title', '')
+                        if not title:
+                            continue
+                        
+                        # Get authors
+                        authors = volume_info.get('authors', [])
+                        
+                        # Get published date
+                        published = volume_info.get('publishedDate', '')
+                        if published:
+                            # Extract just the year if full date is present
+                            published = published.split('-')[0]
+                        
+                        # Get description
+                        summary = volume_info.get('description', '')
+                        
+                        # Get download link (prefer PDF, fallback to EPUB)
+                        download_url = (access_info.get('pdf', {}).get('downloadLink') or 
+                                      access_info.get('epub', {}).get('downloadLink'))
+                        
+                        if download_url:
+                            results.append({
+                                'title': title,
+                                'url': download_url,
+                                'authors': authors,
+                                'published': published,
+                                'summary': summary[:200] + '...' if summary else ''
+                            })
+                            
+                            logger.info(f"Found book: {title}")
+                    
+                    except Exception as e:
+                        logger.error(f"Error parsing Google Books entry: {str(e)}")
+                        continue
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error searching Google Books: {str(e)}")
+            return []
+
     def download_paper(self, url, title):
         """Download a paper with progress tracking."""
         try:
@@ -418,6 +489,19 @@ class ResourceScraper:
         all_papers.extend(arxiv_papers)
         
         # Finally search Semantic Scholar
+        logger.info("\nSearching Semantic Scholar...")
+        semantic_papers = self.search_semantic_scholar(query, max_results)
+        if semantic_papers:
+            logger.info(f"\nFound {len(semantic_papers)} papers on Semantic Scholar:")
+            for i, paper in enumerate(semantic_papers, 1):
+                logger.info(f"\n{i}. {paper['title']}")
+                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
+                logger.info(f"   Published: {paper['published']}")
+                if paper.get('summary'):
+                    logger.info(f"   Summary: {paper['summary']}")
+        all_papers.extend(semantic_papers)
+        
+        # Search Google Scholar
         logger.info("\nSearching Google Scholar...")
         google_papers = self.search_google_scholar(query, max_results)
         if google_papers:
@@ -430,18 +514,18 @@ class ResourceScraper:
                     logger.info(f"   Summary: {paper['summary']}")
         all_papers.extend(google_papers)
 
-
-        logger.info("\nSearching Semantic Scholar...")
-        semantic_papers = self.search_semantic_scholar(query, max_results)
-        if semantic_papers:
-            logger.info(f"\nFound {len(semantic_papers)} papers on Semantic Scholar:")
-            for i, paper in enumerate(semantic_papers, 1):
-                logger.info(f"\n{i}. {paper['title']}")
-                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
-                logger.info(f"   Published: {paper['published']}")
-                if paper.get('summary'):
-                    logger.info(f"   Summary: {paper['summary']}")
-        all_papers.extend(semantic_papers)
+        # Search Google Books
+        logger.info("\nSearching Google Books...")
+        google_books = self.search_google_books(query, max_results)
+        if google_books:
+            logger.info(f"\nFound {len(google_books)} books on Google Books:")
+            for i, book in enumerate(google_books, 1):
+                logger.info(f"\n{i}. {book['title']}")
+                logger.info(f"   Authors: {', '.join(book['authors'][:3])}")
+                logger.info(f"   Published: {book['published']}")
+                if book.get('summary'):
+                    logger.info(f"   Summary: {book['summary']}")
+        all_papers.extend(google_books)
         
         if not all_papers:
             logger.info("No papers found.")
