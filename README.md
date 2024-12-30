@@ -17,7 +17,6 @@ A powerful Python tool for searching and downloading academic papers from multip
   - Automatic PDF retrieval
   - Rich metadata extraction
   - Smart file naming
-  - Progress tracking
   - Detailed logging
 
 - NotebookLM Integration:

@@ -8,7 +8,6 @@ from tqdm import tqdm
 import concurrent.futures
 import re
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -33,6 +32,7 @@ class ResourceScraper:
         self.scholar_url = 'https://scholar.google.com/scholar'
         self.google_books_url = 'https://www.googleapis.com/books/v1/volumes'
         self.wikibooks_url = 'https://en.wikibooks.org'
+        self.eric_url = 'https://eric.ed.gov'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -45,11 +45,8 @@ class ResourceScraper:
 
     def sanitize_filename(self, filename):
         """Clean filename by removing invalid characters and limiting length."""
-        # Remove invalid characters
         filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.'))
-        # Replace multiple spaces with single space
         filename = ' '.join(filename.split())
-        # Limit filename length (150 chars max)
         if len(filename) > 150:
             filename = filename[:147] + "..."
         return filename
@@ -57,20 +54,18 @@ class ResourceScraper:
     def search_arxiv(self, query, max_results=10):
         """Search arXiv for papers."""
         try:
-            # Encode query and create search URL
             encoded_query = quote_plus(query)
             search_url = f"{self.arxiv_url}all:{encoded_query}&start=0&max_results={max_results}"
             
             logger.info(f"Searching arXiv for: {query}")
             
-            # Make the request
             response = self.session.get(search_url, timeout=30)
             
             if response.status_code == 200:
-                # Parse XML response
+                
                 root = ET.fromstring(response.content)
                 
-                # Define XML namespaces
+                
                 namespaces = {
                     'atom': 'http://www.w3.org/2005/Atom',
                     'arxiv': 'http://arxiv.org/schemas/atom'
@@ -78,17 +73,17 @@ class ResourceScraper:
                 
                 results = []
                 
-                # Process each entry
+                
                 for entry in root.findall('atom:entry', namespaces):
                     try:
-                        # Extract paper details
+                        
                         title = entry.find('atom:title', namespaces).text.strip()
                         authors = [author.find('atom:name', namespaces).text 
                                  for author in entry.findall('atom:author', namespaces)]
                         published = entry.find('atom:published', namespaces).text
                         summary = entry.find('atom:summary', namespaces).text.strip()
                         
-                        # Get PDF link
+                        
                         links = entry.findall('atom:link', namespaces)
                         pdf_url = None
                         for link in links:
@@ -146,13 +141,13 @@ class ResourceScraper:
                             logger.debug(f"No title found in paper data: {paper}")
                             continue
                         
-                        # Safely get the PDF URL
+                        
                         pdf_url = paper.get('openAccessPdf', {}).get('url', '')
                         if not pdf_url:
                             logger.debug(f"No PDF URL found for paper: {title}")
                             continue
                         
-                        # Safely get metadata
+                        
                         authors = [author.get('name', '') for author in paper.get('authors', []) if author.get('name')]
                         year = paper.get('year', '') or 'Unknown'
                         abstract = paper.get('abstract', '') or 'No abstract available'
@@ -184,7 +179,7 @@ class ResourceScraper:
     def search_pmc(self, query, max_results=10):
         """Search PubMed Central for papers."""
         try:
-            # First search for IDs
+            
             esearch_url = f"{self.pmc_url}esearch.fcgi"
             search_params = {
                 'db': 'pmc',
@@ -207,7 +202,7 @@ class ResourceScraper:
             if not pmcids:
                 return []
                 
-            # Then fetch details for each ID
+            
             efetch_url = f"{self.pmc_url}efetch.fcgi"
             fetch_params = {
                 'db': 'pmc',
@@ -220,7 +215,7 @@ class ResourceScraper:
                 logger.error(f"Failed to fetch PMC details. Status code: {response.status_code}")
                 return []
                 
-            # Parse XML response
+            
             root = ET.fromstring(response.content)
             results = []
             
@@ -364,7 +359,7 @@ class ResourceScraper:
                 'q': query,
                 'maxResults': max_results,
                 'filter': 'free-ebooks',  # Only get free and downloadable books
-                'download': 'epub',  # Include download links
+                'download': 'epub',  
                 'printType': 'books'
             }
             
@@ -380,7 +375,7 @@ class ResourceScraper:
                         volume_info = item.get('volumeInfo', {})
                         access_info = item.get('accessInfo', {})
                         
-                        # Skip if no download links available
+                        
                         if not access_info.get('pdf', {}).get('downloadLink') and not access_info.get('epub', {}).get('downloadLink'):
                             continue
                         
@@ -388,19 +383,19 @@ class ResourceScraper:
                         if not title:
                             continue
                         
-                        # Get authors
+                        
                         authors = volume_info.get('authors', [])
                         
-                        # Get published date
+                        
                         published = volume_info.get('publishedDate', '')
                         if published:
-                            # Extract just the year if full date is present
+                            
                             published = published.split('-')[0]
                         
-                        # Get description
+                        
                         summary = volume_info.get('description', '')
                         
-                        # Get download link (prefer PDF, fallback to EPUB)
+                        
                         download_url = (access_info.get('pdf', {}).get('downloadLink') or 
                                       access_info.get('epub', {}).get('downloadLink'))
                         
@@ -445,12 +440,12 @@ class ResourceScraper:
             
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                # Find all search results
+                
                 search_results = soup.find_all('div', class_='mw-search-result-heading')
                 
                 for result in search_results[:max_results]:
                     try:
-                        # Get title and link
+                        
                         title_elem = result.find('a')
                         if not title_elem:
                             continue
@@ -461,22 +456,22 @@ class ResourceScraper:
                         if not book_url:
                             continue
                         
-                        # Make URL absolute
+                        
                         if book_url.startswith('/'):
                             book_url = self.wikibooks_url + book_url
                         
-                        # Visit book page
+                       
                         book_response = self.session.get(book_url, timeout=30)
                         if book_response.status_code == 200:
                             book_soup = BeautifulSoup(book_response.text, 'html.parser')
                             
-                            # Get authors
+                            
                             authors = []
                             author_links = book_soup.find_all('a', class_='mw-userlink')
                             if author_links:
-                                authors = [a.get_text(strip=True) for a in author_links[:3]]  # Get top 3 contributors
+                                authors = [a.get_text(strip=True) for a in author_links[:3]]  
                             
-                            # Get last modified date as published date
+                            
                             published = ''
                             footer = book_soup.find('div', id='footer-info-lastmod')
                             if footer:
@@ -484,7 +479,7 @@ class ResourceScraper:
                                 if date_match:
                                     published = date_match.group(0)
                             
-                            # Get summary
+                            
                             summary = ''
                             content = book_soup.find('div', id='mw-content-text')
                             if content:
@@ -492,7 +487,7 @@ class ResourceScraper:
                                 if paragraphs:
                                     summary = paragraphs[0].get_text(strip=True)
                             
-                            # Get printable version URL for PDF
+                           
                             printable_url = f"{book_url}?printable=yes"
                             
                             results.append({
@@ -518,13 +513,111 @@ class ResourceScraper:
             logger.error(f"Error searching Wikibooks: {str(e)}")
             return []
 
+    def search_eric(self, query, max_results=10):
+        """
+        Search ERIC (Education Resources Information Center) database.
+        Uses their web interface since it's more reliable than the API.
+        
+        Args:
+            query (str): Search term
+            max_results (int): Maximum number of results to return
+        
+        Returns:
+            list: List of dictionaries containing document information
+        """
+        try:
+            search_url = f'{self.eric_url}/'
+            params = {
+                'q': query,
+                'pg': 1,
+                'nfq': max_results,
+                'ft': 'on'  
+            }
+            
+            logger.info(f"Searching ERIC for: {query}")
+            response = self.session.get(search_url, params=params)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            documents = []
+            
+           
+            results = soup.find_all('div', class_='r_i')
+            
+            for result in results[:max_results]:
+                try:
+                    title_elem = result.find('div', class_='r_t')
+                    if not title_elem:
+                        continue
+                        
+                    title = title_elem.text.strip()
+                    
+                    link = result.find('a', href=True)
+                    if not link:
+                        continue
+                        
+                    doc_id = link['href'].split('id=')[-1] if 'id=' in link['href'] else None
+                    if not doc_id:
+                        continue
+                    
+                    pdf_available = False
+                    pdf_link = result.find('img', {'alt': 'PDF'})
+                    if pdf_link:
+                        pdf_url = f'https://files.eric.ed.gov/fulltext/{doc_id}.pdf'
+                        pdf_check = self.session.head(pdf_url)
+                        if pdf_check.status_code == 200:
+                            pdf_available = True
+                    
+                    authors = []
+                    author_elem = result.find('div', class_='r_a')
+                    if author_elem:
+                        authors = [a.strip() for a in author_elem.text.split(';') if a.strip()]
+                    
+                    year = ''
+                    year_elem = result.find('div', class_='r_y')
+                    if year_elem:
+                        year = year_elem.text.strip()
+                    
+                    summary = ''
+                    desc_elem = result.find('div', class_='r_d')
+                    if desc_elem:
+                        summary = desc_elem.text.strip()
+                    
+                    url = f'{self.eric_url}/?id={doc_id}'
+                    
+                    doc_info = {
+                        'title': title,
+                        'authors': authors,
+                        'url': url,
+                        'published': year,
+                        'summary': summary,
+                        'source': 'ERIC'
+                    }
+                    
+                    if pdf_available:
+                        doc_info['pdf_url'] = f'https://files.eric.ed.gov/fulltext/{doc_id}.pdf'
+                    
+                    documents.append(doc_info)
+                    
+                    logger.info(f"Found ERIC document: {title}")
+                    if pdf_available:
+                        logger.info(f"PDF available at: {doc_info['pdf_url']}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing ERIC result: {str(e)}")
+                    continue
+            
+            return documents
+            
+        except requests.RequestException as e:
+            logger.error(f"ERIC search error: {e}")
+            return []
+
     def download_paper(self, url, title):
         """Download a paper with progress tracking."""
         try:
-            # Ensure output directory exists
             self._create_output_dir()
             
-            # Create a safe filename
             safe_title = self.sanitize_filename(title)
             if not safe_title.endswith('.pdf'):
                 safe_title += '.pdf'
@@ -557,7 +650,6 @@ class ResourceScraper:
         """Search all sources and download papers."""
         all_papers = []
         
-        # Search PMC first
         logger.info("\nSearching PMC...")
         pmc_papers = self.search_pmc(query, max_results)
         if pmc_papers:
@@ -570,7 +662,6 @@ class ResourceScraper:
                     logger.info(f"   Summary: {paper['summary']}")
         all_papers.extend(pmc_papers)
         
-        # Then search arXiv
         logger.info("\nSearching arXiv...")
         arxiv_papers = self.search_arxiv(query, max_results)
         if arxiv_papers:
@@ -582,7 +673,22 @@ class ResourceScraper:
                 logger.info(f"   Summary: {paper['summary'][:200]}...")
         all_papers.extend(arxiv_papers)
         
-        # Finally search Semantic Scholar
+        logger.info("\nSearching ERIC...")
+        eric_papers = self.search_eric(query, max_results)
+        if eric_papers:
+            logger.info(f"\nFound {len(eric_papers)} papers in ERIC:")
+            for i, paper in enumerate(eric_papers, 1):
+                logger.info(f"\n{i}. {paper['title']}")
+                if paper['authors']:
+                    logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
+                if paper['published']:
+                    logger.info(f"   Published: {paper['published']}")
+                if paper.get('summary'):
+                    logger.info(f"   Summary: {paper['summary'][:200]}...")
+                if paper.get('pdf_url'):
+                    logger.info(f"   PDF URL: {paper['pdf_url']}")
+        all_papers.extend(eric_papers)
+        
         logger.info("\nSearching Semantic Scholar...")
         semantic_papers = self.search_semantic_scholar(query, max_results)
         if semantic_papers:
@@ -595,7 +701,6 @@ class ResourceScraper:
                     logger.info(f"   Summary: {paper['summary']}")
         all_papers.extend(semantic_papers)
         
-        # Search Google Scholar
         logger.info("\nSearching Google Scholar...")
         google_papers = self.search_google_scholar(query, max_results)
         if google_papers:
@@ -608,7 +713,6 @@ class ResourceScraper:
                     logger.info(f"   Summary: {paper['summary']}")
         all_papers.extend(google_papers)
 
-        # Search Google Books
         logger.info("\nSearching Google Books...")
         google_books = self.search_google_books(query, max_results)
         if google_books:
@@ -621,7 +725,6 @@ class ResourceScraper:
                     logger.info(f"   Summary: {book['summary']}")
         all_papers.extend(google_books)
         
-        # Search Wikibooks
         logger.info("\nSearching Wikibooks...")
         wikibooks = self.search_wikibooks(query, max_results)
         if wikibooks:
@@ -638,15 +741,14 @@ class ResourceScraper:
             logger.info("No papers found.")
             return []
         
-        # Download papers concurrently
         downloaded = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             future_to_paper = {
                 executor.submit(
                     self.download_paper,
-                    paper['url'],
+                    paper.get('pdf_url', paper.get('url')),
                     paper['title']
-                ): paper for paper in all_papers
+                ): paper for paper in all_papers if paper.get('pdf_url') or paper.get('url')
             }
             
             for future in concurrent.futures.as_completed(future_to_paper):
@@ -670,7 +772,7 @@ def main():
             break
             
         try:
-            limit = int(input("How many resources would you like to download? (default: 5): ") or 5)
+            limit = int(input("How many resources would you like to download from each source? (default: 5): ") or 5)
         except ValueError:
             limit = 5
             
