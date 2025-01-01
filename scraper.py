@@ -33,6 +33,7 @@ class ResourceScraper:
         self.google_books_url = 'https://www.googleapis.com/books/v1/volumes'
         self.wikibooks_url = 'https://en.wikibooks.org'
         self.eric_url = 'https://eric.ed.gov'
+        self.openlibrary_url = 'https://openlibrary.org'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -555,7 +556,7 @@ class ResourceScraper:
                     link = result.find('a', href=True)
                     if not link:
                         continue
-                        
+                    
                     doc_id = link['href'].split('id=')[-1] if 'id=' in link['href'] else None
                     if not doc_id:
                         continue
@@ -613,6 +614,134 @@ class ResourceScraper:
             logger.error(f"ERIC search error: {e}")
             return []
 
+    def search_openlibrary(self, query, max_results=10):
+        """
+        Search OpenLibrary catalog.
+        OpenLibrary provides a comprehensive catalog of books and academic resources.
+        
+        Args:
+            query (str): Search term
+            max_results (int): Maximum number of results to return
+        
+        Returns:
+            list: List of dictionaries containing document information
+        """
+        try:
+            search_url = f'{self.openlibrary_url}/search.json'
+            params = {
+                'q': query,
+                'limit': max_results,
+                'fields': 'title,author_name,first_publish_year,number_of_pages_median,ebook_count_i,edition_count,subject,key'
+            }
+            
+            logger.info(f"Searching OpenLibrary for: {query}")
+            response = self.session.get(search_url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            documents = []
+            
+            for doc in data.get('docs', [])[:max_results]:
+                try:
+                    title = doc.get('title', '').strip()
+                    if not title:
+                        continue
+                    
+                    # Get authors
+                    authors = doc.get('author_name', [])
+                    
+                    # Get year
+                    year = str(doc.get('first_publish_year', '')) if doc.get('first_publish_year') else ''
+                    
+                    # Create OpenLibrary URL
+                    key = doc.get('key', '')
+                    url = f'https://openlibrary.org{key}' if key else None
+                    
+                    # Create summary with available information
+                    summary_parts = []
+                    if doc.get('edition_count'):
+                        summary_parts.append(f"Available in {doc['edition_count']} editions")
+                    if doc.get('ebook_count_i'):
+                        summary_parts.append(f"{doc['ebook_count_i']} ebook versions")
+                    if doc.get('number_of_pages_median'):
+                        summary_parts.append(f"~{doc['number_of_pages_median']} pages")
+                    if doc.get('subject', []):
+                        subjects = doc['subject'][:3]  # Get first 3 subjects
+                        summary_parts.append(f"Subjects: {', '.join(subjects)}")
+                    
+                    summary = '. '.join(summary_parts)
+                    
+                    doc_info = {
+                        'title': title,
+                        'authors': authors,
+                        'url': url,
+                        'published': year,
+                        'summary': summary,
+                        'source': 'OpenLibrary'
+                    }
+                    
+                    documents.append(doc_info)
+                    logger.info(f"Found document: {title}")
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing OpenLibrary entry: {str(e)}")
+                    continue
+            
+            return documents
+            
+        except Exception as e:
+            logger.error(f"Error searching OpenLibrary: {str(e)}")
+            return []
+
+    def search_and_download(self, query, max_results=10):
+        """Search all sources and download papers."""
+        all_results = []
+        
+        # Search each source
+        arxiv_results = self.search_arxiv(query, max_results)
+        semantic_results = self.search_semantic_scholar(query, max_results)
+        pmc_results = self.search_pmc(query, max_results)
+        scholar_results = self.search_google_scholar(query, max_results)
+        books_results = self.search_google_books(query, max_results)
+        wiki_results = self.search_wikibooks(query, max_results)
+        eric_results = self.search_eric(query, max_results)
+        openlibrary_results = self.search_openlibrary(query, max_results)
+        
+        # Combine all results
+        all_results.extend(arxiv_results)
+        all_results.extend(semantic_results)
+        all_results.extend(pmc_results)
+        all_results.extend(scholar_results)
+        all_results.extend(books_results)
+        all_results.extend(wiki_results)
+        all_results.extend(eric_results)
+        all_results.extend(openlibrary_results)
+        
+        if not all_results:
+            logger.info("No papers found.")
+            return []
+        
+        downloaded = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            future_to_paper = {
+                executor.submit(
+                    self.download_paper,
+                    paper.get('pdf_url', paper.get('url')),
+                    paper['title']
+                ): paper for paper in all_results if paper.get('pdf_url') or paper.get('url')
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_paper):
+                paper = future_to_paper[future]
+                try:
+                    success, filepath = future.result()
+                    if success:
+                        downloaded.append((paper['title'], filepath))
+                except Exception as e:
+                    logger.error(f"Error downloading {paper['title']}: {str(e)}")
+        
+        return downloaded
+
     def download_paper(self, url, title):
         """Download a paper with progress tracking."""
         try:
@@ -645,122 +774,6 @@ class ResourceScraper:
         except Exception as e:
             logger.error(f"Error downloading {title}: {str(e)}")
             return False, None
-
-    def search_and_download(self, query, max_results=10):
-        """Search all sources and download papers."""
-        all_papers = []
-        
-        logger.info("\nSearching PMC...")
-        pmc_papers = self.search_pmc(query, max_results)
-        if pmc_papers:
-            logger.info(f"\nFound {len(pmc_papers)} papers on PMC:")
-            for i, paper in enumerate(pmc_papers, 1):
-                logger.info(f"\n{i}. {paper['title']}")
-                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
-                logger.info(f"   Published: {paper['published']}")
-                if paper.get('summary'):
-                    logger.info(f"   Summary: {paper['summary']}")
-        all_papers.extend(pmc_papers)
-        
-        logger.info("\nSearching arXiv...")
-        arxiv_papers = self.search_arxiv(query, max_results)
-        if arxiv_papers:
-            logger.info(f"\nFound {len(arxiv_papers)} papers on arXiv:")
-            for i, paper in enumerate(arxiv_papers, 1):
-                logger.info(f"\n{i}. {paper['title']}")
-                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
-                logger.info(f"   Published: {paper['published'][:10]}")
-                logger.info(f"   Summary: {paper['summary'][:200]}...")
-        all_papers.extend(arxiv_papers)
-        
-        logger.info("\nSearching ERIC...")
-        eric_papers = self.search_eric(query, max_results)
-        if eric_papers:
-            logger.info(f"\nFound {len(eric_papers)} papers in ERIC:")
-            for i, paper in enumerate(eric_papers, 1):
-                logger.info(f"\n{i}. {paper['title']}")
-                if paper['authors']:
-                    logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
-                if paper['published']:
-                    logger.info(f"   Published: {paper['published']}")
-                if paper.get('summary'):
-                    logger.info(f"   Summary: {paper['summary'][:200]}...")
-                if paper.get('pdf_url'):
-                    logger.info(f"   PDF URL: {paper['pdf_url']}")
-        all_papers.extend(eric_papers)
-        
-        logger.info("\nSearching Semantic Scholar...")
-        semantic_papers = self.search_semantic_scholar(query, max_results)
-        if semantic_papers:
-            logger.info(f"\nFound {len(semantic_papers)} papers on Semantic Scholar:")
-            for i, paper in enumerate(semantic_papers, 1):
-                logger.info(f"\n{i}. {paper['title']}")
-                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
-                logger.info(f"   Published: {paper['published']}")
-                if paper.get('summary'):
-                    logger.info(f"   Summary: {paper['summary']}")
-        all_papers.extend(semantic_papers)
-        
-        logger.info("\nSearching Google Scholar...")
-        google_papers = self.search_google_scholar(query, max_results)
-        if google_papers:
-            logger.info(f"\nFound {len(google_papers)} papers on Google Scholar:")
-            for i, paper in enumerate(google_papers, 1):
-                logger.info(f"\n{i}. {paper['title']}")
-                logger.info(f"   Authors: {', '.join(paper['authors'][:3])}")
-                logger.info(f"   Published: {paper['published']}")
-                if paper.get('summary'):
-                    logger.info(f"   Summary: {paper['summary']}")
-        all_papers.extend(google_papers)
-
-        logger.info("\nSearching Google Books...")
-        google_books = self.search_google_books(query, max_results)
-        if google_books:
-            logger.info(f"\nFound {len(google_books)} books on Google Books:")
-            for i, book in enumerate(google_books, 1):
-                logger.info(f"\n{i}. {book['title']}")
-                logger.info(f"   Authors: {', '.join(book['authors'][:3])}")
-                logger.info(f"   Published: {book['published']}")
-                if book.get('summary'):
-                    logger.info(f"   Summary: {book['summary']}")
-        all_papers.extend(google_books)
-        
-        logger.info("\nSearching Wikibooks...")
-        wikibooks = self.search_wikibooks(query, max_results)
-        if wikibooks:
-            logger.info(f"\nFound {len(wikibooks)} books on Wikibooks:")
-            for i, book in enumerate(wikibooks, 1):
-                logger.info(f"\n{i}. {book['title']}")
-                logger.info(f"   Authors: {', '.join(book['authors'][:3])}")
-                logger.info(f"   Published: {book['published']}")
-                if book.get('summary'):
-                    logger.info(f"   Summary: {book['summary']}")
-        all_papers.extend(wikibooks)
-        
-        if not all_papers:
-            logger.info("No papers found.")
-            return []
-        
-        downloaded = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            future_to_paper = {
-                executor.submit(
-                    self.download_paper,
-                    paper.get('pdf_url', paper.get('url')),
-                    paper['title']
-                ): paper for paper in all_papers if paper.get('pdf_url') or paper.get('url')
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_paper):
-                paper = future_to_paper[future]
-                try:
-                    success, filepath = future.result()
-                    if success:
-                        downloaded.append((paper['title'], filepath))
-                except Exception as e:
-                    logger.error(f"Error downloading {paper['title']}: {str(e)}")
-        
-        return downloaded
 
 def main():
     """Main function to run the scraper."""
