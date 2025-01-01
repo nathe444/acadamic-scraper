@@ -35,6 +35,7 @@ class ResourceScraper:
         self.eric_url = 'https://eric.ed.gov'
         self.openlibrary_url = 'https://openlibrary.org'
         self.gutenberg_url = 'https://gutendex.com'
+        self.scitech_url = 'https://www.sciencebase.gov/catalog/items'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -670,7 +671,7 @@ class ResourceScraper:
                         subjects = doc['subject'][:3]  # Get first 3 subjects
                         summary_parts.append(f"Subjects: {', '.join(subjects)}")
                     
-                    summary = '. '.join(summary_parts)
+                    summary = '. '.join(filter(None, summary_parts))
                     
                     doc_info = {
                         'title': title,
@@ -762,7 +763,7 @@ class ResourceScraper:
                         subjects = bookshelves[:3]  # Get first 3 subjects
                         summary_parts.append(f"Categories: {', '.join(subjects)}")
                     
-                    summary = '. '.join(summary_parts)
+                    summary = '. '.join(filter(None, summary_parts))
                     
                     doc_info = {
                         'title': title,
@@ -786,6 +787,118 @@ class ResourceScraper:
             logger.error(f"Error searching Project Gutenberg: {str(e)}")
             return []
 
+    def search_scitech(self, query, max_results=10):
+        """
+        Search Science.gov for scientific papers and technical reports.
+        Science.gov searches over 60 databases and over 2200 scientific websites.
+        
+        Args:
+            query (str): Search term
+            max_results (int): Maximum number of results to return
+        
+        Returns:
+            list: List of dictionaries containing document information
+        """
+        try:
+            params = {
+                'q': query,
+                'format': 'json',
+                'max': str(max_results),
+                'f': 'downloadable:true'  # Only get downloadable content
+            }
+            
+            logger.info(f"Searching Science.gov for: {query}")
+            response = self.session.get(self.scitech_url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            documents = []
+            
+            for item in data.get('items', [])[:max_results]:
+                try:
+                    title = item.get('title', '').strip()
+                    if not title:
+                        continue
+                    
+                    # Get authors
+                    authors = []
+                    for contact in item.get('contacts', []):
+                        name = contact.get('name', '')
+                        if name:
+                            authors.append(name)
+                    
+                    # Get year
+                    year = ''
+                    date = item.get('datePublished', '')
+                    if date:
+                        year_match = re.search(r'\b\d{4}\b', str(date))
+                        if year_match:
+                            year = year_match.group(0)
+                    
+                    # Get URL
+                    url = None
+                    for link in item.get('webLinks', []):
+                        if link.get('type') == 'download':
+                            url = link.get('uri')
+                            break
+                    if not url:
+                        url = item.get('link', {}).get('url')
+                    
+                    if not url:
+                        continue
+                    
+                    # Create summary with available information
+                    summary_parts = []
+                    
+                    # Add abstract/body
+                    body = item.get('body', '')
+                    if body:
+                        summary_parts.append(body[:200] + '...' if len(body) > 200 else body)
+                    
+                    # Add publisher/source
+                    publisher = item.get('publisher', '')
+                    if publisher:
+                        summary_parts.append(f"Published by: {publisher}")
+                    
+                    # Add tags/keywords
+                    tags = item.get('tags', [])
+                    if tags:
+                        summary_parts.append(f"Topics: {', '.join(tags[:3])}")
+                    
+                    # Add document type
+                    doc_type = item.get('browseCategories', [])
+                    if doc_type:
+                        summary_parts.append(f"Type: {', '.join(doc_type[:2])}")
+                    
+                    # Add citation info if available
+                    citation = item.get('citation', '')
+                    if citation:
+                        summary_parts.append(f"Citation: {citation}")
+                    
+                    summary = '. '.join(filter(None, summary_parts))
+                    
+                    doc_info = {
+                        'title': title,
+                        'authors': authors[:3],  # Limit to 3 authors
+                        'url': url,
+                        'published': year,
+                        'summary': summary,
+                        'source': 'Science.gov'
+                    }
+                    
+                    documents.append(doc_info)
+                    logger.info(f"Found document: {title}")
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing Science.gov entry: {str(e)}")
+                    continue
+            
+            return documents
+            
+        except Exception as e:
+            logger.error(f"Error searching Science.gov: {str(e)}")
+            return []
+
     def search_and_download(self, query, max_results=10):
         """Search all sources and download papers."""
         all_results = []
@@ -800,6 +913,7 @@ class ResourceScraper:
         eric_results = self.search_eric(query, max_results)
         openlibrary_results = self.search_openlibrary(query, max_results)
         gutenberg_results = self.search_gutenberg(query, max_results)
+        scitech_results = self.search_scitech(query, max_results)
         
         # Combine all results
         all_results.extend(arxiv_results)
@@ -811,6 +925,7 @@ class ResourceScraper:
         all_results.extend(eric_results)
         all_results.extend(openlibrary_results)
         all_results.extend(gutenberg_results)
+        all_results.extend(scitech_results)
         
         if not all_results:
             logger.info("No papers found.")
