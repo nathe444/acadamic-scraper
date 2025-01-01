@@ -34,6 +34,7 @@ class ResourceScraper:
         self.wikibooks_url = 'https://en.wikibooks.org'
         self.eric_url = 'https://eric.ed.gov'
         self.openlibrary_url = 'https://openlibrary.org'
+        self.gutenberg_url = 'https://gutendex.com'
 
     def _create_output_dir(self):
         """Create the output directory if it doesn't exist."""
@@ -693,6 +694,98 @@ class ResourceScraper:
             logger.error(f"Error searching OpenLibrary: {str(e)}")
             return []
 
+    def search_gutenberg(self, query, max_results=10):
+        """
+        Search Project Gutenberg library using Gutendex API.
+        Project Gutenberg offers over 70,000 free eBooks.
+        
+        Args:
+            query (str): Search term
+            max_results (int): Maximum number of results to return
+        
+        Returns:
+            list: List of dictionaries containing document information
+        """
+        try:
+            search_url = f'{self.gutenberg_url}/books'
+            params = {
+                'search': query,
+            }
+            
+            logger.info(f"Searching Project Gutenberg for: {query}")
+            response = self.session.get(search_url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            documents = []
+            
+            for book in data.get('results', [])[:max_results]:
+                try:
+                    title = book.get('title', '').strip()
+                    if not title:
+                        continue
+                    
+                    # Get authors
+                    authors = []
+                    for author in book.get('authors', []):
+                        name = author.get('name')
+                        if name:
+                            authors.append(name)
+                    
+                    # Get download links
+                    formats = book.get('formats', {})
+                    download_url = None
+                    for format_type in ['application/pdf', 'text/html', 'text/plain']:
+                        if format_type in formats:
+                            download_url = formats[format_type]
+                            break
+                    
+                    if not download_url:
+                        continue
+                    
+                    # Create summary with available information
+                    summary_parts = []
+                    
+                    # Add languages
+                    languages = book.get('languages', [])
+                    if languages:
+                        summary_parts.append(f"Available in: {', '.join(languages)}")
+                    
+                    # Add download count if available
+                    download_count = book.get('download_count')
+                    if download_count:
+                        summary_parts.append(f"Downloaded {download_count:,} times")
+                    
+                    # Add subjects/bookshelves
+                    bookshelves = book.get('bookshelves', [])
+                    if bookshelves:
+                        subjects = bookshelves[:3]  # Get first 3 subjects
+                        summary_parts.append(f"Categories: {', '.join(subjects)}")
+                    
+                    summary = '. '.join(summary_parts)
+                    
+                    doc_info = {
+                        'title': title,
+                        'authors': authors,
+                        'url': download_url,
+                        'published': '',  # Gutenberg API doesn't provide publication year
+                        'summary': summary,
+                        'source': 'Project Gutenberg'
+                    }
+                    
+                    documents.append(doc_info)
+                    logger.info(f"Found document: {title}")
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing Gutenberg entry: {str(e)}")
+                    continue
+            
+            return documents
+            
+        except Exception as e:
+            logger.error(f"Error searching Project Gutenberg: {str(e)}")
+            return []
+
     def search_and_download(self, query, max_results=10):
         """Search all sources and download papers."""
         all_results = []
@@ -706,6 +799,7 @@ class ResourceScraper:
         wiki_results = self.search_wikibooks(query, max_results)
         eric_results = self.search_eric(query, max_results)
         openlibrary_results = self.search_openlibrary(query, max_results)
+        gutenberg_results = self.search_gutenberg(query, max_results)
         
         # Combine all results
         all_results.extend(arxiv_results)
@@ -716,6 +810,7 @@ class ResourceScraper:
         all_results.extend(wiki_results)
         all_results.extend(eric_results)
         all_results.extend(openlibrary_results)
+        all_results.extend(gutenberg_results)
         
         if not all_results:
             logger.info("No papers found.")
