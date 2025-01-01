@@ -11,6 +11,10 @@ A powerful Python tool for searching and downloading academic papers from multip
   - Google Scholar - Wide academic coverage
   - Google Books - Free and downloadable books
   - Wikibooks - Free educational textbooks and manuals
+  - ERIC - Education Resources Information Center
+  - OpenLibrary - Millions of free books and documents
+  - Project Gutenberg - Over 70,000 free eBooks
+  - Science.gov - Scientific papers and technical reports
 
 - Advanced capabilities:
   - Concurrent downloads (up to 3 simultaneous)
@@ -22,7 +26,6 @@ A powerful Python tool for searching and downloading academic papers from multip
 - NotebookLM Integration:
   - Downloads papers in PDF format ready for NotebookLM import
   - Extracts rich metadata for better context
-  - Organizes papers systematically for easy upload
   - Supports building comprehensive research datasets
   - Perfect for training domain-specific AI models
 
@@ -40,7 +43,7 @@ pip install -r requirements.txt
 python scraper.py
 ```
 
-## Search Order
+## Search Sources
 
 Papers are searched in the following order:
 1. PubMed Central (PMC) - Peer-reviewed biomedical literature
@@ -49,6 +52,10 @@ Papers are searched in the following order:
 4. Google Scholar
 5. Google Books
 6. Wikibooks - Open educational resources
+7. ERIC - Educational research and information
+8. OpenLibrary - Digital library of free books
+9. Project Gutenberg - Classic literature and academic texts
+10. Science.gov - Government scientific research
 
 ## Output
 
